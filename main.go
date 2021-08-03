@@ -157,16 +157,87 @@ func main() {
 
 	defer handlePanic()
 
+	mediaAlbumIds := make([]int64, 0)
+
 	for update := range listener.Updates {
 		if update.GetClass() == client.ClassUpdate {
 			log.Printf("%#v", update)
-			// if updateNewMessage, ok := update.(*client.UpdateNewMessage); ok {
-			// 	src := updateNewMessage.Message
-			// 	// log.Print("**** src.ChatId ", src.ChatId)
-			// 	if content, ok := src.Content.(*client.MessageText); ok {
-			// 		log.Printf("**** src.ChatId %d %s", src.ChatId, content.Text.Text)
-			// 	}
-			// }
+			if updateNewMessage, ok := update.(*client.UpdateNewMessage); ok {
+				src := updateNewMessage.Message
+				if src.IsOutgoing {
+					continue
+				}
+				mediaAlbumId := int64(src.MediaAlbumId)
+				if src.MediaAlbumId != 0 {
+					if containsInt64(mediaAlbumIds, mediaAlbumId) {
+						continue
+					} else {
+						mediaAlbumIds = append(mediaAlbumIds, mediaAlbumId)
+					}
+				}
+				formattedText, err := tdlibClient.ParseTextEntities(&client.ParseTextEntitiesRequest{
+					Text: "*bbbb*",
+					ParseMode: &client.TextParseModeMarkdown{
+						Version: 2,
+					},
+				})
+				if err != nil {
+					log.Print("ParseTextEntities() ", err)
+				} else {
+					if _, err := tdlibClient.SendMessage(&client.SendMessageRequest{
+						ChatId: src.ChatId,
+						InputMessageContent: &client.InputMessageText{
+							Text:                  formattedText,
+							DisableWebPagePreview: true,
+							ClearDraft:            true,
+						},
+						Options: &client.MessageSendOptions{
+							DisableNotification: true,
+						},
+						ReplyMarkup: func() client.ReplyMarkup {
+							if true {
+								log.Print("**** ReplyMarkup")
+								s := "https://ya.ru"
+								Rows := make([][]*client.InlineKeyboardButton, 0)
+								Btns := make([]*client.InlineKeyboardButton, 0)
+								Btns = append(Btns, &client.InlineKeyboardButton{
+									Text: "Go", Type: &client.InlineKeyboardButtonTypeCallback{Data: []byte(s)},
+								})
+								Rows = append(Rows, Btns)
+								return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+							}
+							return nil
+						}(),
+					}); err != nil {
+						log.Print("SendMessage() ", err)
+					}
+				}
+				// _, err := tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
+				// 	ChatId:    src.ChatId,
+				// 	MessageId: src.Id,
+				// 	ReplyMarkup: func() client.ReplyMarkup {
+				// 		if true {
+				// 			log.Print("**** ReplyMarkup")
+				// 			s := "https://ya.ru"
+				// 			Rows := make([][]*client.InlineKeyboardButton, 0)
+				// 			Btns := make([]*client.InlineKeyboardButton, 0)
+				// 			Btns = append(Btns, &client.InlineKeyboardButton{
+				// 				Text: "Go", Type: &client.InlineKeyboardButtonTypeCallback{Data: []byte(s)},
+				// 			})
+				// 			Rows = append(Rows, Btns)
+				// 			return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+				// 		}
+				// 		return nil
+				// 	}(),
+				// })
+				// if err != nil {
+				// 	log.Print(err)
+				// }
+				// 	log.Print("**** src.ChatId ", src.ChatId)
+				// 	if content, ok := src.Content.(*client.MessageText); ok {
+				// 		log.Printf("**** src.ChatId %d %s", src.ChatId, content.Text.Text)
+				// 	}
+			}
 		}
 	}
 }
