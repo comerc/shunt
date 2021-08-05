@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -162,11 +163,19 @@ func main() {
 	for update := range listener.Updates {
 		if update.GetClass() == client.ClassUpdate {
 			log.Printf("%#v", update)
+			// if updateMessageSendSucceeded, ok := update.(*client.UpdateMessageSendSucceeded); ok {
+			// 	src := updateMessageSendSucceeded.Message
+			// 	log.Print("**** updateMessageSendSucceeded")
+			// 	log.Printf("%#v", src)
+
 			if updateNewMessage, ok := update.(*client.UpdateNewMessage); ok {
 				src := updateNewMessage.Message
+
 				if src.IsOutgoing {
 					continue
 				}
+				log.Printf("%#v", src)
+
 				mediaAlbumId := int64(src.MediaAlbumId)
 				if src.MediaAlbumId != 0 {
 					if containsInt64(mediaAlbumIds, mediaAlbumId) {
@@ -175,44 +184,104 @@ func main() {
 						mediaAlbumIds = append(mediaAlbumIds, mediaAlbumId)
 					}
 				}
+				log.Print("**** start GetMessageLink")
+				messageLink, err := tdlibClient.GetMessageLink(&client.GetMessageLinkRequest{
+					ChatId:    src.ChatId,
+					MessageId: src.Id,
+					ForAlbum:  src.MediaAlbumId != 0,
+				})
+				if err != nil {
+					log.Print(err)
+				}
+				log.Print("**** end GetMessageLink")
+
 				formattedText, err := tdlibClient.ParseTextEntities(&client.ParseTextEntitiesRequest{
-					Text: "*bbbb*",
+					// Text: "*bbbb*",
+					Text: fmt.Sprintf("[\U0001f517](%s)", messageLink.Link),
 					ParseMode: &client.TextParseModeMarkdown{
 						Version: 2,
 					},
 				})
 				if err != nil {
 					log.Print("ParseTextEntities() ", err)
-				} else {
-					if _, err := tdlibClient.SendMessage(&client.SendMessageRequest{
-						ChatId: src.ChatId,
-						InputMessageContent: &client.InputMessageText{
-							Text:                  formattedText,
-							DisableWebPagePreview: true,
-							ClearDraft:            true,
-						},
-						Options: &client.MessageSendOptions{
-							DisableNotification: true,
-						},
-						ReplyMarkup: func() client.ReplyMarkup {
-							if true {
-								log.Print("**** ReplyMarkup")
-								s := "https://ya.ru"
-								Rows := make([][]*client.InlineKeyboardButton, 0)
-								Btns := make([]*client.InlineKeyboardButton, 0)
-								Btns = append(Btns, &client.InlineKeyboardButton{
-									Text: "Go", Type: &client.InlineKeyboardButtonTypeCallback{Data: []byte(s)},
-								})
-								Rows = append(Rows, Btns)
-								return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
-							}
-							return nil
-						}(),
-					}); err != nil {
-						log.Print("SendMessage() ", err)
-					}
+					continue
 				}
-				// _, err := tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
+				if _, err := tdlibClient.SendMessage(&client.SendMessageRequest{
+					ChatId: src.ChatId,
+					// ReplyToMessageId: src.Id,
+					InputMessageContent: &client.InputMessageText{
+						Text:                  formattedText,
+						DisableWebPagePreview: true,
+						ClearDraft:            true,
+					},
+					Options: &client.MessageSendOptions{
+						DisableNotification: true,
+					},
+					ReplyMarkup: func() client.ReplyMarkup {
+						if true {
+							log.Print("**** ReplyMarkup")
+							s := "https://ya.ru"
+							Rows := make([][]*client.InlineKeyboardButton, 0)
+							Btns := make([]*client.InlineKeyboardButton, 0)
+							Btns = append(Btns, &client.InlineKeyboardButton{
+								Text: "Go", Type: &client.InlineKeyboardButtonTypeCallback{Data: []byte(s)},
+							})
+							Rows = append(Rows, Btns)
+							return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+						}
+						return nil
+					}(),
+				}); err != nil {
+					log.Print("SendMessage() ", err)
+				}
+
+				// {
+				// 	contents := make([]client.InputMessageContent, 0)
+				// 	path, _ := os.Getwd()
+
+				// 	content1 := &client.InputMessagePhoto{
+				// 		Photo: &client.InputFileLocal{Path: filepath.Join(path, "assets/1.png")},
+				// 		// Thumbnail: , // https://github.com/tdlib/td/issues/1505
+				// 		// A: if you use InputFileRemote, then there is no way to change the thumbnail, so there are no reasons to specify it.
+				// 		// TODO: AddedStickerFileIds: ,
+				// 		// Width:   messagePhoto.Photo.Sizes[0].Width,
+				// 		// Height:  messagePhoto.Photo.Sizes[0].Height,
+				// 		Caption: formattedText,
+				// 		// Ttl: ,
+				// 	}
+				// 	contents = append(contents, content1)
+				// 	content2 := &client.InputMessagePhoto{
+				// 		Photo: &client.InputFileLocal{Path: filepath.Join(path, "assets/2.png")},
+				// 		// Thumbnail: , // https://github.com/tdlib/td/issues/1505
+				// 		// A: if you use InputFileRemote, then there is no way to change the thumbnail, so there are no reasons to specify it.
+				// 		// TODO: AddedStickerFileIds: ,
+				// 		// Width:   messagePhoto.Photo.Sizes[0].Width,
+				// 		// Height:  messagePhoto.Photo.Sizes[0].Height,
+				// 		Caption: formattedText,
+				// 		// Ttl: ,
+				// 	}
+				// 	contents = append(contents, content2)
+
+				// 	if messages, err := tdlibClient.SendMessageAlbum(&client.SendMessageAlbumRequest{
+				// 		ChatId:               src.ChatId,
+				// 		InputMessageContents: contents,
+				// 	}); err != nil {
+				// 		log.Print("SendMessageAlbum() ", err)
+				// 		continue
+				// 	} else {
+				// 		src = messages.Messages[0]
+				// 	}
+
+				// mediaAlbumId := int64(src.MediaAlbumId)
+				// if src.MediaAlbumId != 0 {
+				// 	if containsInt64(mediaAlbumIds, mediaAlbumId) {
+				// 	} else {
+				// 		mediaAlbumIds = append(mediaAlbumIds, mediaAlbumId)
+				// 		continue
+				// 	}
+				// }
+
+				// _, err = tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
 				// 	ChatId:    src.ChatId,
 				// 	MessageId: src.Id,
 				// 	ReplyMarkup: func() client.ReplyMarkup {
@@ -233,10 +302,11 @@ func main() {
 				// if err != nil {
 				// 	log.Print(err)
 				// }
-				// 	log.Print("**** src.ChatId ", src.ChatId)
-				// 	if content, ok := src.Content.(*client.MessageText); ok {
-				// 		log.Printf("**** src.ChatId %d %s", src.ChatId, content.Text.Text)
-				// 	}
+				// log.Print("**** src.ChatId ", src.ChatId)
+				// if content, ok := src.Content.(*client.MessageText); ok {
+				// 	log.Printf("**** src.ChatId %d %s", src.ChatId, content.Text.Text)
+				// }
+
 			}
 		}
 	}
