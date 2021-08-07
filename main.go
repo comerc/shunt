@@ -166,101 +166,101 @@ func main() {
 		if update.GetClass() == client.ClassUpdate {
 			log.Printf("%#v", update)
 			if updateNewCallbackQuery, ok := update.(*client.UpdateNewCallbackQuery); ok {
-				data := ""
-				if callbackQueryPayloadData, ok := updateNewCallbackQuery.Payload.(*client.CallbackQueryPayloadData); ok {
-					data = string(callbackQueryPayloadData.Data)
-				}
-				if data == "" {
-					log.Print("CallbackQueryPayloadData: Data is empty")
-					continue
-				}
-				a := strings.Split(data, "|")
-				command := a[0]
-				// srcId := int64(convertToInt(a[1]))
-				lastUrl := a[2]
-				// TODO: кнопки ERROR & CANCEL
-				if command == "OK" {
-					messageLinkInfo, err := tdlibClient.GetMessageLinkInfo(&client.GetMessageLinkInfoRequest{
-						Url: lastUrl,
-					})
-					if err != nil {
-						log.Print(err)
-						continue
-					}
-					if messageLinkInfo.Message == nil {
-						log.Print("GetMessageLinkInfo() messageLinkInfo.Message is empty")
-						continue
-					}
-					var messageIds []int64
-					if messageLinkInfo.ForAlbum {
-						mediaAlbumId := mediaAlbumIdByMessageId[messageLinkInfo.Message.Id]
-						if mediaAlbumId == 0 {
-							log.Print("mediaAlbumId is empty")
-							continue
-						}
-						messageIds = messageIdsByAlbumId[mediaAlbumId]
-						if len(messageIds) == 0 {
-							log.Print("messageIds is empty")
-							continue
-						}
+				errorCode := func() int {
+					data := ""
+					if callbackQueryPayloadData, ok := updateNewCallbackQuery.Payload.(*client.CallbackQueryPayloadData); ok {
+						data = string(callbackQueryPayloadData.Data)
 					} else {
-						messageIds = []int64{messageLinkInfo.Message.Id}
+						return 1000
 					}
-					// log.Printf("**** %#v", mediaAlbumIdByMessageId)
-					result, err := tdlibClient.ForwardMessages(&client.ForwardMessagesRequest{
-						// TODO: config
-						ChatId:     -1001211314640, // ch_2
-						FromChatId: messageLinkInfo.ChatId,
+					if data == "" {
+						log.Print("CallbackQueryPayloadData: Data is empty")
+						return 1001
+					}
+					a := strings.Split(data, "|")
+					if len(a) != 3 {
+						log.Print("CallbackQueryPayloadData: Invalid Data - len() ")
+						return 1002
+					}
+					command := a[0]
+					if !contains([]string{"OK", "CANCEL", "ERROR"}, command) {
+						log.Print("CallbackQueryPayloadData: Invalid Data - command")
+						return 1003
+					}
+					srcId := int64(convertToInt(a[1]))
+					if srcId == 0 {
+						log.Print("CallbackQueryPayloadData: Invalid Data - srcId")
+						return 1004
+					}
+					lastUrl := a[2]
+					var messageIds []int64
+					if command == "OK" {
+						messageLinkInfo, err := tdlibClient.GetMessageLinkInfo(&client.GetMessageLinkInfoRequest{
+							Url: lastUrl,
+						})
+						if err != nil {
+							log.Print(err)
+							return 1005
+						}
+						if messageLinkInfo.Message == nil {
+							log.Print("GetMessageLinkInfo(): messageLinkInfo.Message is empty")
+							return 1006
+						}
+						if messageLinkInfo.ForAlbum {
+							mediaAlbumId := mediaAlbumIdByMessageId[messageLinkInfo.Message.Id]
+							if mediaAlbumId == 0 {
+								log.Print("mediaAlbumId is empty")
+								return 1007
+							}
+							messageIds = messageIdsByAlbumId[mediaAlbumId]
+							if len(messageIds) == 0 {
+								log.Print("messageIds is empty")
+								return 1008
+							}
+						} else {
+							messageIds = []int64{messageLinkInfo.Message.Id}
+						}
+						messages, err := tdlibClient.ForwardMessages(&client.ForwardMessagesRequest{
+							// TODO: config
+							ChatId:     -1001211314640, // ch_2
+							FromChatId: messageLinkInfo.ChatId,
+							MessageIds: messageIds,
+						})
+						if err != nil {
+							log.Print("ForwardMessages() ", err)
+							return 1009
+						} else if len(messages.Messages) != int(messages.TotalCount) || messages.TotalCount == 0 {
+							log.Print("ForwardMessages(): invalid TotalCount")
+							return 1010
+						}
+					}
+					messageIds = append(messageIds, updateNewCallbackQuery.MessageId)
+					if _, err := tdlibClient.DeleteMessages(&client.DeleteMessagesRequest{
+						ChatId:     updateNewCallbackQuery.ChatId,
 						MessageIds: messageIds,
-					})
-					// log.Printf("**** %#v", result)
-					if err != nil {
-						log.Print("ForwardMessages() ", err)
-					} else if len(result.Messages) != int(result.TotalCount) || result.TotalCount == 0 {
-						log.Print("ForwardMessages(): invalid TotalCount")
+					}); err != nil {
+						log.Print(err)
+						return 1011
 					}
-				}
-				// TODO: delete messages (+ for albums)
-				// if _, err := tdlibClient.DeleteMessages(&client.DeleteMessagesRequest{
-				// 	ChatId:     updateNewCallbackQuery.ChatId,
-				// 	MessageIds: []int64{srcId, updateNewCallbackQuery.MessageId},
-				// }); err != nil {
-				// 	log.Print(err)
-				// }
+					return 0
+				}()
 				_, err := tdlibClient.AnswerCallbackQuery(&client.AnswerCallbackQueryRequest{
 					CallbackQueryId: updateNewCallbackQuery.Id,
-					Text:            command,
+					Text: func() string {
+						if errorCode > 0 {
+							return fmt.Sprintf("Error! Code %d", errorCode)
+						}
+						return ""
+					}(),
 				})
 				if err != nil {
 					log.Print(err)
-					continue
 				}
 			} else if updateNewMessage, ok := update.(*client.UpdateNewMessage); ok {
 				src := updateNewMessage.Message
 				if src.IsOutgoing {
 					continue
 				}
-				// _, err = tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
-				// 	ChatId:    src.ChatId,
-				// 	MessageId: src.Id,
-				// 	ReplyMarkup: func() client.ReplyMarkup {
-				// 		if true {
-				// 			log.Print("**** ReplyMarkup")
-				// 			s := "https://ya.ru"
-				// 			Rows := make([][]*client.InlineKeyboardButton, 0)
-				// 			Btns := make([]*client.InlineKeyboardButton, 0)
-				// 			Btns = append(Btns, &client.InlineKeyboardButton{
-				// 				Text: "Go", Type: &client.InlineKeyboardButtonTypeCallback{Data: []byte(s)},
-				// 			})
-				// 			Rows = append(Rows, Btns)
-				// 			return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
-				// 		}
-				// 		return nil
-				// 	}(),
-				// })
-				// if err != nil {
-				// 	log.Print(err)
-				// }
 				mediaAlbumId := int64(src.MediaAlbumId)
 				if mediaAlbumId != 0 {
 					mediaAlbumIdByMessageId[src.Id] = mediaAlbumId
@@ -291,9 +291,22 @@ func main() {
 					log.Print("ParseTextEntities() ", err)
 					continue
 				}
+				lastUrl := ""
+				if formattedText := getFormattedText(src.Content); formattedText != nil {
+					l := len(formattedText.Entities)
+					if l > 0 {
+						lastEntity := formattedText.Entities[l-1]
+						if url, ok := lastEntity.Type.(*client.TextEntityTypeTextUrl); ok {
+							lastUrl = url.Url
+						}
+					}
+				}
+				if lastUrl == "" {
+					log.Print("MessageText: lastUrl is empty")
+					continue
+				}
 				if _, err := tdlibClient.SendMessage(&client.SendMessageRequest{
 					ChatId: src.ChatId,
-					// ReplyToMessageId: src.Id,
 					InputMessageContent: &client.InputMessageText{
 						Text:                  formattedText,
 						DisableWebPagePreview: true,
@@ -303,39 +316,20 @@ func main() {
 						DisableNotification: true,
 					},
 					ReplyMarkup: func() client.ReplyMarkup {
-						lastUrl := ""
-						if content, ok := src.Content.(*client.MessageText); ok {
-							l := len(content.Text.Entities)
-							if l > 0 {
-								latEntity := content.Text.Entities[l-1]
-								if url, ok := latEntity.Type.(*client.TextEntityTypeTextUrl); ok {
-									lastUrl = url.Url
-								}
-							}
-						}
 						Rows := make([][]*client.InlineKeyboardButton, 0)
 						Btns := make([]*client.InlineKeyboardButton, 0)
-						if lastUrl == "" {
-							Btns = append(Btns, &client.InlineKeyboardButton{
-								Text: "⛔️ Error",
-								Type: &client.InlineKeyboardButtonTypeCallback{
-									Data: []byte(fmt.Sprintf("ERROR|%d|", src.Id)),
-								},
-							})
-						} else {
-							Btns = append(Btns, &client.InlineKeyboardButton{
-								Text: "✅ Yes!",
-								Type: &client.InlineKeyboardButtonTypeCallback{
-									Data: []byte(fmt.Sprintf("OK|%d|%s", src.Id, lastUrl)),
-								},
-							})
-							Btns = append(Btns, &client.InlineKeyboardButton{
-								Text: "🛑 Stop",
-								Type: &client.InlineKeyboardButtonTypeCallback{
-									Data: []byte(fmt.Sprintf("CANCEL|%d|", src.Id)),
-								},
-							})
-						}
+						Btns = append(Btns, &client.InlineKeyboardButton{
+							Text: "✅ Yes!",
+							Type: &client.InlineKeyboardButtonTypeCallback{
+								Data: []byte(fmt.Sprintf("OK|%d|%s", src.Id, lastUrl)),
+							},
+						})
+						Btns = append(Btns, &client.InlineKeyboardButton{
+							Text: "🛑 Stop",
+							Type: &client.InlineKeyboardButtonTypeCallback{
+								Data: []byte(fmt.Sprintf("CANCEL|%d|", src.Id)),
+							},
+						})
 						Rows = append(Rows, Btns)
 						return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
 					}(),
@@ -496,4 +490,24 @@ func escapeAll(s string) string {
 func getRand(min, max int) int {
 	rand.Seed(time.Now().UnixNano())
 	return rand.Intn(max-min+1) + min
+}
+
+func getFormattedText(messageContent client.MessageContent) *client.FormattedText {
+	switch content := messageContent.(type) {
+	case *client.MessageText:
+		return content.Text
+	case *client.MessagePhoto:
+		return content.Caption
+	case *client.MessageAnimation:
+		return content.Caption
+	case *client.MessageAudio:
+		return content.Caption
+	case *client.MessageDocument:
+		return content.Caption
+	case *client.MessageVideo:
+		return content.Caption
+	case *client.MessageVoiceNote:
+		return content.Caption
+	}
+	return nil
 }
