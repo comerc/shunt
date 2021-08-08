@@ -1,20 +1,17 @@
 package main
 
 import (
-	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-	utf16 "unicode/utf16"
 
 	"github.com/comerc/shunt/config"
 	"github.com/dgraph-io/badger"
@@ -158,10 +155,6 @@ func main() {
 
 	defer handlePanic()
 
-	// TODO: сохранять в БД
-	messageIdsByAlbumId := make(map[int64][]int64)   // map[mediaAlbumId][]messageId
-	mediaAlbumIdByMessageId := make(map[int64]int64) // map[messageId]mediaAlbumId
-
 	for update := range listener.Updates {
 		if update.GetClass() == client.ClassUpdate {
 			log.Printf("%#v", update)
@@ -207,12 +200,12 @@ func main() {
 							return 1006
 						}
 						if messageLinkInfo.ForAlbum {
-							mediaAlbumId := mediaAlbumIdByMessageId[messageLinkInfo.Message.Id]
+							mediaAlbumId := getMediaAlbumIdByMessageId(messageLinkInfo.Message.Id)
 							if mediaAlbumId == 0 {
 								log.Print("mediaAlbumId is empty")
 								return 1007
 							}
-							messageIds = messageIdsByAlbumId[mediaAlbumId]
+							messageIds = getMessageIdsByMediaAlbumId(mediaAlbumId)
 							if len(messageIds) == 0 {
 								log.Print("messageIds is empty")
 								return 1008
@@ -263,13 +256,15 @@ func main() {
 				}
 				mediaAlbumId := int64(src.MediaAlbumId)
 				if mediaAlbumId != 0 {
-					mediaAlbumIdByMessageId[src.Id] = mediaAlbumId
-					a := messageIdsByAlbumId[mediaAlbumId]
-					if len(a) > 0 {
-						messageIdsByAlbumId[mediaAlbumId] = append(a, src.Id)
+					setMediaAlbumIdByMessageId(src.Id, mediaAlbumId)
+					messageIds := getMessageIdsByMediaAlbumId(mediaAlbumId)
+					if len(messageIds) > 0 {
+						messageIds = append(messageIds, src.Id)
+						setMessageIdsByMediaAlbumId(mediaAlbumId, messageIds)
 						continue
 					}
-					messageIdsByAlbumId[mediaAlbumId] = []int64{src.Id}
+					messageIds = []int64{src.Id}
+					setMessageIdsByMediaAlbumId(mediaAlbumId, messageIds)
 				}
 				// TODO: https://github.com/tdlib/td/issues/1649
 				messageLink, err := tdlibClient.GetMessageLink(&client.GetMessageLinkRequest{
@@ -359,14 +354,14 @@ func contains(a []string, s string) bool {
 	return false
 }
 
-func containsInt64(a []int64, e int64) bool {
-	for _, t := range a {
-		if t == e {
-			return true
-		}
-	}
-	return false
-}
+// func containsInt64(a []int64, e int64) bool {
+// 	for _, t := range a {
+// 		if t == e {
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }
 
 func handlePanic() {
 	if err := recover(); err != nil {
@@ -377,27 +372,27 @@ func handlePanic() {
 
 // **** db routines
 
-func uint64ToBytes(i uint64) []byte {
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], i)
-	return buf[:]
-}
+// func uint64ToBytes(i uint64) []byte {
+// 	var buf [8]byte
+// 	binary.BigEndian.PutUint64(buf[:], i)
+// 	return buf[:]
+// }
 
-func bytesToUint64(b []byte) uint64 {
-	return binary.BigEndian.Uint64(b)
-}
+// func bytesToUint64(b []byte) uint64 {
+// 	return binary.BigEndian.Uint64(b)
+// }
 
-func incrementByDB(key []byte) []byte {
-	// Merge function to add two uint64 numbers
-	add := func(existing, new []byte) []byte {
-		return uint64ToBytes(bytesToUint64(existing) + bytesToUint64(new))
-	}
-	m := badgerDB.GetMergeOperator(key, add, 200*time.Millisecond)
-	defer m.Stop()
-	m.Add(uint64ToBytes(1))
-	result, _ := m.Get()
-	return result
-}
+// func incrementByDB(key []byte) []byte {
+// 	// Merge function to add two uint64 numbers
+// 	add := func(existing, new []byte) []byte {
+// 		return uint64ToBytes(bytesToUint64(existing) + bytesToUint64(new))
+// 	}
+// 	m := badgerDB.GetMergeOperator(key, add, 200*time.Millisecond)
+// 	defer m.Stop()
+// 	m.Add(uint64ToBytes(1))
+// 	result, _ := m.Get()
+// 	return result
+// }
 
 func getByDB(key []byte) []byte {
 	var (
@@ -418,7 +413,7 @@ func getByDB(key []byte) []byte {
 	})
 	if err != nil {
 		log.Printf("getByDB() key: %s err: %s", string(key), err)
-	} else {
+		// } else {
 		// log.Printf("getByDB() key: %s val: %s", string(key), string(val))
 	}
 	return val
@@ -431,66 +426,66 @@ func setByDB(key []byte, val []byte) {
 	})
 	if err != nil {
 		log.Printf("setByDB() key: %s err: %s ", string(key), err)
-	} else {
+		// } else {
 		// log.Printf("setByDB() key: %s val: %s", string(key), string(val))
 	}
 }
 
-func deleteByDB(key []byte) {
-	err := badgerDB.Update(func(txn *badger.Txn) error {
-		return txn.Delete(key)
-	})
-	if err != nil {
-		log.Print(err)
-	}
-}
+// func deleteByDB(key []byte) {
+// 	err := badgerDB.Update(func(txn *badger.Txn) error {
+// 		return txn.Delete(key)
+// 	})
+// 	if err != nil {
+// 		log.Print(err)
+// 	}
+// }
 
-func distinct(a []string) []string {
-	set := make(map[string]struct{})
-	for _, val := range a {
-		set[val] = struct{}{}
-	}
-	result := make([]string, 0, len(set))
-	for key := range set {
-		result = append(result, key)
-	}
-	return result
-}
+// func distinct(a []string) []string {
+// 	set := make(map[string]struct{})
+// 	for _, val := range a {
+// 		set[val] = struct{}{}
+// 	}
+// 	result := make([]string, 0, len(set))
+// 	for key := range set {
+// 		result = append(result, key)
+// 	}
+// 	return result
+// }
 
-func strLen(s string) int {
-	return len(utf16.Encode([]rune(s)))
-}
+// func strLen(s string) int {
+// 	return len(utf16.Encode([]rune(s)))
+// }
 
-func escapeAll(s string) string {
-	// эскейпит все символы: которые нужны для markdown-разметки
-	a := []string{
-		"_",
-		"*",
-		`\[`,
-		`\]`,
-		"(",
-		")",
-		"~",
-		"`",
-		">",
-		"#",
-		"+",
-		`\-`,
-		"=",
-		"|",
-		"{",
-		"}",
-		".",
-		"!",
-	}
-	re := regexp.MustCompile("[" + strings.Join(a, "|") + "]")
-	return re.ReplaceAllString(s, `\$0`)
-}
+// func escapeAll(s string) string {
+// 	// эскейпит все символы: которые нужны для markdown-разметки
+// 	a := []string{
+// 		"_",
+// 		"*",
+// 		`\[`,
+// 		`\]`,
+// 		"(",
+// 		")",
+// 		"~",
+// 		"`",
+// 		">",
+// 		"#",
+// 		"+",
+// 		`\-`,
+// 		"=",
+// 		"|",
+// 		"{",
+// 		"}",
+// 		".",
+// 		"!",
+// 	}
+// 	re := regexp.MustCompile("[" + strings.Join(a, "|") + "]")
+// 	return re.ReplaceAllString(s, `\$0`)
+// }
 
-func getRand(min, max int) int {
-	rand.Seed(time.Now().UnixNano())
-	return rand.Intn(max-min+1) + min
-}
+// func getRand(min, max int) int {
+// 	rand.Seed(time.Now().UnixNano())
+// 	return rand.Intn(max-min+1) + min
+// }
 
 func getFormattedText(messageContent client.MessageContent) *client.FormattedText {
 	switch content := messageContent.(type) {
@@ -510,4 +505,47 @@ func getFormattedText(messageContent client.MessageContent) *client.FormattedTex
 		return content.Caption
 	}
 	return nil
+}
+
+const messageIdsByMediaAlbumIdPrefix = "msg-ma"
+
+func setMessageIdsByMediaAlbumId(mediaAlbumId int64, messageIds []int64) {
+	key := []byte(fmt.Sprintf("%s:%d", messageIdsByMediaAlbumIdPrefix, mediaAlbumId))
+	val, err := json.Marshal(messageIds)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	setByDB(key, val)
+}
+
+func getMessageIdsByMediaAlbumId(mediaAlbumId int64) []int64 {
+	key := []byte(fmt.Sprintf("%s:%d", messageIdsByMediaAlbumIdPrefix, mediaAlbumId))
+	val := getByDB(key)
+	if val == nil {
+		return nil
+	}
+	var result []int64
+	if err := json.Unmarshal(val, &result); err != nil {
+		log.Print(err)
+		return nil
+	}
+	return result
+}
+
+const mediaAlbumIdByMessageIdPrefix = "ma-msg"
+
+func setMediaAlbumIdByMessageId(messageId int64, mediaAlbumId int64) {
+	key := []byte(fmt.Sprintf("%s:%d", mediaAlbumIdByMessageIdPrefix, messageId))
+	val := []byte(fmt.Sprintf("%d", mediaAlbumId))
+	setByDB(key, val)
+}
+
+func getMediaAlbumIdByMessageId(messageId int64) int64 {
+	key := []byte(fmt.Sprintf("%s:%d", mediaAlbumIdByMessageIdPrefix, messageId))
+	val := getByDB(key)
+	if val == nil {
+		return 0
+	}
+	return int64(convertToInt(string(val)))
 }
