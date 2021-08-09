@@ -1,0 +1,13 @@
+# -1001228194405 # ShuntSrc
+# -1001520284375 # ShuntDst
+# -1001589755721 # ShuntMain
+# -1001549561833 # ShuntTrash
+# -1001549644187 # ShuntFrom
+# -1001502018633 # ShuntCopyTo
+# -1001554800981 # ShuntCancel
+Main: -1001589755721
+Trash: -1001549561833
+Forwards:
+  - From: -1001549644187
+    CopyTo: -1001502018633
+    Cancel: -1001554800981
