@@ -1,4 +1,6 @@
 shunt
 .tdata/
 .env
+.config.yml
+.config.*.yml
 try/
