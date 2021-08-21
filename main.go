@@ -9,7 +9,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -83,6 +85,7 @@ func main() {
 		}
 		// configMu.Lock()
 		// defer configMu.Unlock()
+		// TODO: проверка, что Main (ну и Trash) не назначен в Forwards
 		configData = tmp
 		// TODO: надо дожидаться инициализации конфига при старте
 	})
@@ -298,7 +301,7 @@ func main() {
 					}
 					return 0
 				}()
-				_, err := tdlibClient.AnswerCallbackQuery(&client.AnswerCallbackQueryRequest{
+				if _, err := tdlibClient.AnswerCallbackQuery(&client.AnswerCallbackQueryRequest{
 					CallbackQueryId: updateNewCallbackQuery.Id,
 					Text: func() string {
 						if errorCode > 0 {
@@ -307,9 +310,9 @@ func main() {
 						return ""
 					}(),
 					ShowAlert: true,
-				})
-				if err != nil {
+				}); err != nil {
 					log.Print(err)
+					continue
 				}
 				continue
 			}
@@ -318,7 +321,8 @@ func main() {
 				if src.IsOutgoing {
 					continue
 				}
-				if src.ChatId == configData.Main || isForwardsSrc(src.ChatId) {
+				isForwardsSrc := isForwardsSrc(src.ChatId)
+				if (src.ChatId == configData.Main) || isForwardsSrc {
 					if src.MediaAlbumId != 0 {
 						mediaAlbumId := int64(src.MediaAlbumId)
 						setMediaAlbumIdByChatMessageId(src.ChatId, src.Id, mediaAlbumId)
@@ -333,19 +337,8 @@ func main() {
 					}
 				}
 				if src.ChatId == configData.Main {
-					sourceLink := ""
-					if formattedText := getFormattedText(src.Content); formattedText != nil {
-						l := len(formattedText.Entities)
-						if l > 0 {
-							lastEntity := formattedText.Entities[l-1]
-							if url, ok := lastEntity.Type.(*client.TextEntityTypeTextUrl); ok {
-								sourceLink = url.Url
-							}
-						}
-					}
-					if sourceLink == "" {
-						log.Print("MessageText: sourceLink is empty")
-					}
+					sourceLink := getSourceLink(src)
+					hasSourceAnswer(sourceLink)
 					formattedText := func() *client.FormattedText {
 						// TODO: https://github.com/tdlib/td/issues/1649
 						messageLink, err := tdlibClient.GetMessageLink(&client.GetMessageLinkRequest{
@@ -410,8 +403,31 @@ func main() {
 						}(),
 					}); err != nil {
 						log.Print("SendMessage() ", err)
+						continue
 					}
+				} else if isForwardsSrc && src.MediaAlbumId == 0 {
+					hasAnswer(src.ChatId, src.Id)
 				}
+				continue
+			}
+			if updateMessageEdited, ok := update.(*client.UpdateMessageEdited); ok {
+				chatId := updateMessageEdited.ChatId
+				messageId := updateMessageEdited.MessageId
+				if chatId == configData.Main {
+					src, err := tdlibClient.GetMessage(&client.GetMessageRequest{
+						ChatId:    chatId,
+						MessageId: messageId,
+					})
+					if err != nil {
+						log.Print(err)
+						continue
+					}
+					sourceLink := getSourceLink(src)
+					hasSourceAnswer(sourceLink)
+				} else if isForwardsSrc(chatId) {
+					hasAnswer(chatId, messageId)
+				}
+				continue
 			}
 		}
 	}
@@ -638,4 +654,62 @@ func getMediaAlbumIdByChatMessageId(chatId, messageId int64) int64 {
 func isForwardsSrc(srcChatId int64) bool {
 	_, ok := configData.Forwards[srcChatId]
 	return ok
+}
+
+func hasAnswer(chatId, messageId int64) {
+	// TODO: зациклить запросы до получения результата или тайм-аут
+	time.Sleep(1 * time.Second)
+	api := "http://127.0.0.1:4004"
+	url := fmt.Sprintf("%s/answer?chat_id=%d&message_id=%d&only_check=1", api, chatId, messageId)
+	log.Print(url)
+	response, err := http.Get(url)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer response.Body.Close()
+	// b, err := httputil.DumpResponse(response, true)
+	// if err != nil {
+	// 	log.Print(err)
+	// }
+	// log.Print(string(b))
+	result, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	log.Print(string(result))
+}
+
+func getSourceLink(message *client.Message) string {
+	sourceLink := ""
+	if formattedText := getFormattedText(message.Content); formattedText != nil {
+		l := len(formattedText.Entities)
+		if l > 0 {
+			lastEntity := formattedText.Entities[l-1]
+			if url, ok := lastEntity.Type.(*client.TextEntityTypeTextUrl); ok {
+				sourceLink = url.Url
+			}
+		}
+	}
+	return sourceLink
+}
+
+func hasSourceAnswer(sourceLink string) {
+	if sourceLink == "" {
+		log.Print("sourceLink is empty")
+		return
+	}
+	messageLinkInfo, err := tdlibClient.GetMessageLinkInfo(&client.GetMessageLinkInfoRequest{
+		Url: sourceLink,
+	})
+	if err != nil {
+		log.Print(err)
+	} else if messageLinkInfo.Message == nil {
+		log.Print("messageLinkInfo.Message is empty")
+	} else if !messageLinkInfo.ForAlbum {
+		chatId := messageLinkInfo.ChatId
+		messageId := messageLinkInfo.Message.Id
+		hasAnswer(chatId, messageId)
+	}
 }
