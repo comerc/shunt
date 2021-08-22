@@ -1,5 +1,7 @@
 package main
 
+// TODO: отключение модерации, прямая пересылка из From в To (т.к. надо накапливать ссылочную БД)
+
 // TODO: функционал для модерирования редактирования (можно хранить историю через ReplyToMessageId?); учитывать, что может быть несколько копий в dst - нужно везде внести изменения из dst
 // TODO: строковые константы вместо числовых кодов ошибок
 
@@ -167,7 +169,9 @@ func main() {
 	for update := range listener.Updates {
 		if update.GetClass() == client.ClassUpdate {
 			// log.Printf("%#v", update)
-			if updateNewCallbackQuery, ok := update.(*client.UpdateNewCallbackQuery); ok {
+			switch updateType := update.(type) {
+			case *client.UpdateNewCallbackQuery:
+				updateNewCallbackQuery := updateType
 				// TODO: если несколько модераторов (нужно проверять флаг в базе по query.MessageId)
 				query := updateNewCallbackQuery
 				forward, isForward := configData.Forwards[query.ChatId]
@@ -229,7 +233,7 @@ func main() {
 							} else if sourceMediaAlbumId == -1 {
 								sourceMediaAlbumId = 0 // т.к. 0 - значимое значение, то передаётся, как -1
 							}
-							log.Printf("updateNewCallbackQuery command: %s srcId: %d sourceChatId: %d sourceMessageId: %d sourceMediaAlbumId: %d", command, srcId, sourceChatId, sourceMessageId, sourceMediaAlbumId)
+							log.Printf("CallbackQueryPayloadData command: %s srcId: %d sourceChatId: %d sourceMessageId: %d sourceMediaAlbumId: %d", command, srcId, sourceChatId, sourceMessageId, sourceMediaAlbumId)
 							if command == "ANSWER" {
 								// TODO: добавить текст в src
 
@@ -325,7 +329,7 @@ func main() {
 							return 0
 						}()
 						if _, err := tdlibClient.AnswerCallbackQuery(&client.AnswerCallbackQueryRequest{
-							CallbackQueryId: updateNewCallbackQuery.Id,
+							CallbackQueryId: query.Id,
 							Text: func() string {
 								if errorCode > 0 {
 									return fmt.Sprintf("Error! %d", errorCode)
@@ -340,8 +344,8 @@ func main() {
 					}
 					queue.PushBack(fn)
 				}
-			}
-			if updateNewMessage, ok := update.(*client.UpdateNewMessage); ok {
+			case *client.UpdateNewMessage:
+				updateNewMessage := updateType
 				src := updateNewMessage.Message
 				log.Printf("updateNewMessage %d:%d", src.ChatId, src.Id)
 				if src.IsOutgoing {
@@ -449,8 +453,8 @@ func main() {
 					}
 				}
 				queue.PushBack(fn)
-			}
-			if updateMessageEdited, ok := update.(*client.UpdateMessageEdited); ok {
+			case *client.UpdateMessageEdited:
+				updateMessageEdited := updateType
 				chatId := updateMessageEdited.ChatId
 				messageId := updateMessageEdited.MessageId
 				log.Printf("updateMessageEdited %d:%d", chatId, messageId)
