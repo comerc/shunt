@@ -352,6 +352,7 @@ func main() {
 					log.Print("src.IsOutgoing ", src.ChatId)
 					continue // !!
 				}
+				// TODO: системное сообщение отправлять сразу, без задержки в очереди, а уже в очереди его дополнять
 				fn := func() {
 					forward, isForward := configData.Forwards[src.ChatId]
 					if (src.ChatId == configData.Main) || isForward {
@@ -406,11 +407,11 @@ func main() {
 							ChatId: src.ChatId,
 							InputMessageContent: &client.InputMessageText{
 								Text: func() *client.FormattedText {
-									if sourceData == "" {
-										return &client.FormattedText{Text: "#ERROR 2001"}
-									}
 									if formattedText == nil {
-										return &client.FormattedText{Text: "#ERROR 2002"}
+										return &client.FormattedText{Text: "#ERROR: Invalid System Message"}
+									}
+									if sourceData == "" {
+										formattedText.Text += " #ERROR: Invalid Source Data"
 									}
 									return formattedText
 								}(),
@@ -454,45 +455,46 @@ func main() {
 				}
 				queue.PushBack(fn)
 			case *client.UpdateMessageEdited:
-				updateMessageEdited := updateType
-				chatId := updateMessageEdited.ChatId
-				messageId := updateMessageEdited.MessageId
-				log.Printf("updateMessageEdited %d:%d", chatId, messageId)
-				fn := func() {
-					isForwardAnswer := hasForwardAnswer(chatId)
-					if (chatId == configData.Main) || isForwardAnswer {
-						src, err := tdlibClient.GetMessage(&client.GetMessageRequest{
-							ChatId:    chatId,
-							MessageId: messageId,
-						})
-						if err != nil {
-							log.Print(err)
-							return
-						}
-						if src.MediaAlbumId != 0 {
-							return
-						}
-						if src.ChatId == configData.Main {
-							sourceData, ok := getSourceData(src)
-							if ok {
-								a := strings.Split(sourceData, ":")
-								sourceChatId := int64(convertToInt(a[0]))
-								sourceMessageId := int64(convertToInt(a[1]))
-								if hasForwardAnswer(sourceChatId) {
-									if hasAnswerButton(sourceChatId, sourceMessageId, woRepeat) {
-										addAnswerButton(src.ChatId, src.Id, sourceData)
-									}
-								}
-							}
-						} else if isForwardAnswer {
-							if hasAnswerButton(src.ChatId, src.Id, woRepeat) {
-								sourceData := fmt.Sprintf("%d:%d:-1", src.ChatId, src.Id)
-								addAnswerButton(src.ChatId, src.Id, sourceData)
-							}
-						}
-					}
-				}
-				queue.PushBack(fn)
+				// TODO: не запрашивать hasAnswerButton() снова, а сохранять в БД при UpdateNewMessage и брать там
+				// updateMessageEdited := updateType
+				// chatId := updateMessageEdited.ChatId
+				// messageId := updateMessageEdited.MessageId
+				// log.Printf("updateMessageEdited %d:%d", chatId, messageId)
+				// fn := func() {
+				// 	isForwardAnswer := hasForwardAnswer(chatId)
+				// 	if (chatId == configData.Main) || isForwardAnswer {
+				// 		src, err := tdlibClient.GetMessage(&client.GetMessageRequest{
+				// 			ChatId:    chatId,
+				// 			MessageId: messageId,
+				// 		})
+				// 		if err != nil {
+				// 			log.Print(err)
+				// 			return
+				// 		}
+				// 		if src.MediaAlbumId != 0 {
+				// 			return
+				// 		}
+				// 		if src.ChatId == configData.Main {
+				// 			sourceData, ok := getSourceData(src)
+				// 			if ok {
+				// 				a := strings.Split(sourceData, ":")
+				// 				sourceChatId := int64(convertToInt(a[0]))
+				// 				sourceMessageId := int64(convertToInt(a[1]))
+				// 				if hasForwardAnswer(sourceChatId) {
+				// 					if hasAnswerButton(sourceChatId, sourceMessageId, woRepeat) {
+				// 						addAnswerButton(src.ChatId, src.Id, sourceData)
+				// 					}
+				// 				}
+				// 			}
+				// 		} else if isForwardAnswer {
+				// 			if hasAnswerButton(src.ChatId, src.Id, woRepeat) {
+				// 				sourceData := fmt.Sprintf("%d:%d:-1", src.ChatId, src.Id)
+				// 				addAnswerButton(src.ChatId, src.Id, sourceData)
+				// 			}
+				// 		}
+				// 	}
+				// }
+				// queue.PushBack(fn)
 			}
 			// TODO: удаление из setMessageIdsByChatMediaAlbumId
 		}
@@ -724,7 +726,7 @@ func hasAnswerButton(chatId, messageId, step int64) bool {
 	log.Printf("hasAnswerButton chatId: %d messageId: %d step: %d", chatId, messageId, step)
 	isRepeat := step != woRepeat
 	if isRepeat {
-		if step > configData.AnswerRepeat {
+		if step >= configData.AnswerRepeat {
 			return false
 		}
 	}
@@ -734,7 +736,7 @@ func hasAnswerButton(chatId, messageId, step int64) bool {
 		return false
 	}
 	if isRepeat {
-		time.Sleep(time.Duration(configData.AnswerPause) * time.Millisecond)
+		time.Sleep(time.Duration(configData.AnswerPause) * time.Second)
 	}
 	url := fmt.Sprintf("%s/answer?chat_id=%d&message_id=%d&only_check=1&step=%d&rand=%d",
 		configData.AnswerEndpoint, chatId, messageId, step, time.Now().UnixNano())
