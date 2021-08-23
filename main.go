@@ -179,156 +179,157 @@ func main() {
 				updateNewCallbackQuery := updateType
 				// TODO: если несколько модераторов (нужно проверять флаг в базе по query.MessageId)
 				query := updateNewCallbackQuery
-				if (query.ChatId == configData.Main) || hasForwardAnswer(query.ChatId) {
-					// log.Printf("%#v", query)
-					fn := func() {
-						errorCode := func() int {
-							data := ""
-							if callbackQueryPayloadData, ok := query.Payload.(*client.CallbackQueryPayloadData); ok {
-								data = string(callbackQueryPayloadData.Data)
+				if (query.ChatId != configData.Main) && !hasForwardAnswer(query.ChatId) {
+					continue
+				}
+				// log.Printf("%#v", query)
+				fn := func() {
+					errorCode := func() int {
+						data := ""
+						if callbackQueryPayloadData, ok := query.Payload.(*client.CallbackQueryPayloadData); ok {
+							data = string(callbackQueryPayloadData.Data)
+						}
+						if data == "" {
+							log.Print("CallbackQueryPayloadData > data is empty")
+							return 1001
+						}
+						a := strings.Split(data, "|")
+						if len(a) != 3 {
+							log.Print("CallbackQueryPayloadData > invalid data - len() ")
+							return 1002
+						}
+						command := a[0]
+						if !contains([]string{"ANSWER", "OK", "CANCEL"}, command) {
+							log.Print("CallbackQueryPayloadData > invalid data - command")
+							return 1003
+						}
+						srcId := int64(convertToInt(a[1]))
+						if srcId == 0 {
+							log.Print("CallbackQueryPayloadData > invalid data - srcId")
+							return 1004
+						}
+						src, err := tdlibClient.GetMessage(&client.GetMessageRequest{
+							ChatId:    query.ChatId,
+							MessageId: srcId,
+						})
+						if err != nil {
+							log.Print(err)
+							return 1005
+						}
+						payloadData := a[2]
+						aa := strings.Split(payloadData, ":")
+						if len(aa) != 3 {
+							log.Print("CallbackQueryPayloadData > invalid payloadData - len() ")
+							return 1006
+						}
+						sourceChatId := int64(convertToInt(aa[0]))
+						if sourceChatId == 0 {
+							log.Print("CallbackQueryPayloadData > invalid payloadData - sourceChatId")
+							return 1007
+						}
+						sourceMessageId := int64(convertToInt(aa[1]))
+						if sourceMessageId == 0 {
+							log.Print("CallbackQueryPayloadData > invalid payloadData - sourceMessageId")
+							return 1008
+						}
+						sourceMediaAlbumId := int64(convertToInt(aa[2]))
+						if sourceMediaAlbumId == 0 {
+							log.Print("CallbackQueryPayloadData > invalid payloadData - sourceMediaAlbumId")
+							return 1009
+						} else if sourceMediaAlbumId == -1 {
+							sourceMediaAlbumId = 0 // т.к. 0 - значимое значение, то передаётся, как -1
+						}
+						log.Printf("CallbackQueryPayloadData > command: %s srcId: %d sourceChatId: %d sourceMessageId: %d sourceMediaAlbumId: %d", command, srcId, sourceChatId, sourceMessageId, sourceMediaAlbumId)
+						if command == "ANSWER" {
+							answer := getAnswer(sourceChatId, sourceMessageId)
+							log.Print("**** Answer ", answer)
+							if !addAnswer(sourceChatId, sourceMessageId, answer) {
+								log.Print("CallbackQueryPayloadData > addAnswer() is false")
+								return 1016
 							}
-							if data == "" {
-								log.Print("CallbackQueryPayloadData > data is empty")
-								return 1001
-							}
-							a := strings.Split(data, "|")
-							if len(a) != 3 {
-								log.Print("CallbackQueryPayloadData > invalid data - len() ")
-								return 1002
-							}
-							command := a[0]
-							if !contains([]string{"ANSWER", "OK", "CANCEL"}, command) {
-								log.Print("CallbackQueryPayloadData > invalid data - command")
-								return 1003
-							}
-							srcId := int64(convertToInt(a[1]))
-							if srcId == 0 {
-								log.Print("CallbackQueryPayloadData > invalid data - srcId")
-								return 1004
-							}
-							src, err := tdlibClient.GetMessage(&client.GetMessageRequest{
-								ChatId:    query.ChatId,
-								MessageId: srcId,
-							})
-							if err != nil {
-								log.Print(err)
-								return 1005
-							}
-							payloadData := a[2]
-							aa := strings.Split(payloadData, ":")
-							if len(aa) != 3 {
-								log.Print("CallbackQueryPayloadData > invalid payloadData - len() ")
-								return 1006
-							}
-							sourceChatId := int64(convertToInt(aa[0]))
-							if sourceChatId == 0 {
-								log.Print("CallbackQueryPayloadData > invalid payloadData - sourceChatId")
-								return 1007
-							}
-							sourceMessageId := int64(convertToInt(aa[1]))
-							if sourceMessageId == 0 {
-								log.Print("CallbackQueryPayloadData > invalid payloadData - sourceMessageId")
-								return 1008
-							}
-							sourceMediaAlbumId := int64(convertToInt(aa[2]))
-							if sourceMediaAlbumId == 0 {
-								log.Print("CallbackQueryPayloadData > invalid payloadData - sourceMediaAlbumId")
-								return 1009
-							} else if sourceMediaAlbumId == -1 {
-								sourceMediaAlbumId = 0 // т.к. 0 - значимое значение, то передаётся, как -1
-							}
-							log.Printf("CallbackQueryPayloadData > command: %s srcId: %d sourceChatId: %d sourceMessageId: %d sourceMediaAlbumId: %d", command, srcId, sourceChatId, sourceMessageId, sourceMediaAlbumId)
-							if command == "ANSWER" {
-								answer := getAnswer(sourceChatId, sourceMessageId)
-								log.Print("**** Answer ", answer)
-								if !addAnswer(sourceChatId, sourceMessageId, answer) {
-									log.Print("CallbackQueryPayloadData > addAnswer() is false")
-									return 1016
+						} else {
+							var messageIds []int64
+							// sourceLink := a[2]
+							// messageLinkInfo, err := tdlibClient.GetMessageLinkInfo(&client.GetMessageLinkInfoRequest{
+							// 	Url: sourceLink,
+							// })
+							// if err != nil {
+							// 	log.Print(err)
+							// 	return 1006
+							// }
+							// if messageLinkInfo.Message == nil {
+							// 	log.Print("GetMessageLinkInfo > messageLinkInfo.Message is empty")
+							// 	return 1007
+							// }
+							if sourceMediaAlbumId != 0 {
+								messageIds = getMessageIdsByChatMediaAlbumId(sourceChatId, sourceMediaAlbumId)
+								if len(messageIds) == 0 {
+									log.Print("messageIds is empty")
+									return 1011
 								}
 							} else {
-								var messageIds []int64
-								// sourceLink := a[2]
-								// messageLinkInfo, err := tdlibClient.GetMessageLinkInfo(&client.GetMessageLinkInfoRequest{
-								// 	Url: sourceLink,
-								// })
-								// if err != nil {
-								// 	log.Print(err)
-								// 	return 1006
-								// }
-								// if messageLinkInfo.Message == nil {
-								// 	log.Print("GetMessageLinkInfo > messageLinkInfo.Message is empty")
-								// 	return 1007
-								// }
-								if sourceMediaAlbumId != 0 {
-									messageIds = getMessageIdsByChatMediaAlbumId(sourceChatId, sourceMediaAlbumId)
-									if len(messageIds) == 0 {
-										log.Print("messageIds is empty")
-										return 1011
-									}
-								} else {
-									messageIds = []int64{sourceMessageId}
-								}
-								for fromChatId, forward := range configData.Forwards {
-									if fromChatId == sourceChatId {
-										messages, err := tdlibClient.ForwardMessages(&client.ForwardMessagesRequest{
-											ChatId: func() int64 {
-												if command == "OK" {
-													return forward.To
-												}
-												return configData.Trash
-											}(),
-											FromChatId: fromChatId,
-											MessageIds: messageIds,
-										})
-										if err != nil {
-											log.Print("ForwardMessages > ", err)
-											return 1012
-										}
-										if len(messages.Messages) != int(messages.TotalCount) || messages.TotalCount == 0 {
-											log.Print("ForwardMessages > invalid TotalCount")
-											return 1013
-										}
-										// TODO: выставить флаг в базе, что выполнен форвард (если несколько модераторов)
-										var messageIds []int64
-										if src.MediaAlbumId == 0 {
-											messageIds = []int64{src.Id}
-										} else {
-											messageIds = getMessageIdsByChatMediaAlbumId(src.ChatId, int64(src.MediaAlbumId))
-											if len(messageIds) == 0 {
-												log.Print("messageIds is empty")
-												return 1014
+								messageIds = []int64{sourceMessageId}
+							}
+							for fromChatId, forward := range configData.Forwards {
+								if fromChatId == sourceChatId {
+									messages, err := tdlibClient.ForwardMessages(&client.ForwardMessagesRequest{
+										ChatId: func() int64 {
+											if command == "OK" {
+												return forward.To
 											}
-										}
-										messageIds = append(messageIds, query.MessageId)
-										if _, err := tdlibClient.DeleteMessages(&client.DeleteMessagesRequest{
-											ChatId:     query.ChatId,
-											MessageIds: messageIds,
-										}); err != nil {
-											log.Print(err)
-											return 1015
-										}
-										break
+											return configData.Trash
+										}(),
+										FromChatId: fromChatId,
+										MessageIds: messageIds,
+									})
+									if err != nil {
+										log.Print("ForwardMessages > ", err)
+										return 1012
 									}
+									if len(messages.Messages) != int(messages.TotalCount) || messages.TotalCount == 0 {
+										log.Print("ForwardMessages > invalid TotalCount")
+										return 1013
+									}
+									// TODO: выставить флаг в базе, что выполнен форвард (если несколько модераторов)
+									var messageIds []int64
+									if src.MediaAlbumId == 0 {
+										messageIds = []int64{src.Id}
+									} else {
+										messageIds = getMessageIdsByChatMediaAlbumId(src.ChatId, int64(src.MediaAlbumId))
+										if len(messageIds) == 0 {
+											log.Print("messageIds is empty")
+											return 1014
+										}
+									}
+									messageIds = append(messageIds, query.MessageId)
+									if _, err := tdlibClient.DeleteMessages(&client.DeleteMessagesRequest{
+										ChatId:     query.ChatId,
+										MessageIds: messageIds,
+									}); err != nil {
+										log.Print(err)
+										return 1015
+									}
+									break
 								}
 							}
-							return 0
-						}()
-						if _, err := tdlibClient.AnswerCallbackQuery(&client.AnswerCallbackQueryRequest{
-							CallbackQueryId: query.Id,
-							Text: func() string {
-								if errorCode > 0 {
-									return fmt.Sprintf("Error! %d", errorCode)
-								}
-								return ""
-							}(),
-							ShowAlert: true,
-						}); err != nil {
-							log.Print(err)
-							return
 						}
+						return 0
+					}()
+					if _, err := tdlibClient.AnswerCallbackQuery(&client.AnswerCallbackQueryRequest{
+						CallbackQueryId: query.Id,
+						Text: func() string {
+							if errorCode > 0 {
+								return fmt.Sprintf("Error! %d", errorCode)
+							}
+							return ""
+						}(),
+						ShowAlert: true,
+					}); err != nil {
+						log.Print(err)
+						return
 					}
-					queue.PushBack(fn)
 				}
+				queue.PushBack(fn)
 			case *client.UpdateNewMessage:
 				updateNewMessage := updateType
 				src := updateNewMessage.Message
@@ -342,6 +343,7 @@ func main() {
 					if (src.ChatId == configData.Main) || hasForwardAnswer(src.ChatId) {
 						if src.MediaAlbumId != 0 {
 							mediaAlbumId := int64(src.MediaAlbumId)
+							setMediaAlbumIdByChatMessageId(src.ChatId, src.Id, mediaAlbumId)
 							messageIds := getMessageIdsByChatMediaAlbumId(src.ChatId, mediaAlbumId)
 							if len(messageIds) > 0 {
 								messageIds = append(messageIds, src.Id)
@@ -494,7 +496,40 @@ func main() {
 				if !updateDeleteMessages.IsPermanent {
 					continue
 				}
-				// TODO: удаление из setMessageIdsByChatMediaAlbumId
+				chatId := updateDeleteMessages.ChatId
+				messageIds := updateDeleteMessages.MessageIds
+				log.Printf("updateDeleteMessages > %d:%v", chatId, messageIds)
+				fn := func() {
+					for _, messageId := range messageIds {
+						mediaAlbumId := getMediaAlbumIdByChatMessageId(chatId, messageId)
+						if mediaAlbumId == 0 {
+							continue
+						}
+						mediaAlbumMessageIds := getMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId)
+						m := make(map[int64]bool)
+						for _, mediaAlbumMessageId := range mediaAlbumMessageIds {
+							m[mediaAlbumMessageId] = true
+						}
+						for _, mediaAlbumMessageId := range mediaAlbumMessageIds {
+							if messageId == mediaAlbumMessageId {
+								deleteMediaAlbumIdByChatMessageId(chatId, messageId)
+								m[mediaAlbumMessageId] = false
+							}
+						}
+						a := []int64{}
+						for mediaAlbumMessageId, v := range m {
+							if v {
+								a = append(a, mediaAlbumMessageId)
+							}
+						}
+						if len(a) == 0 {
+							deleteMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId)
+						} else {
+							setMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId, a)
+						}
+					}
+				}
+				queue.PushBack(fn)
 			}
 		}
 	}
@@ -595,14 +630,14 @@ func setByDB(key []byte, val []byte) {
 	}
 }
 
-// func deleteByDB(key []byte) {
-// 	err := badgerDB.Update(func(txn *badger.Txn) error {
-// 		return txn.Delete(key)
-// 	})
-// 	if err != nil {
-// 		log.Print(err)
-// 	}
-// }
+func deleteByDB(key []byte) {
+	err := badgerDB.Update(func(txn *badger.Txn) error {
+		return txn.Delete(key)
+	})
+	if err != nil {
+		log.Print(err)
+	}
+}
 
 // func distinct(a []string) []string {
 // 	set := make(map[string]struct{})
@@ -699,24 +734,36 @@ func getMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId int64) []int64 {
 	return result
 }
 
-// const mediaAlbumIdByMessageIdPrefix = "ma-msg"
+func deleteMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId int64) {
+	key := []byte(fmt.Sprintf("%s:%d:%d", messageIdsByMediaAlbumIdPrefix, chatId, mediaAlbumId))
+	log.Printf("deleteMessageIdsByChatMediaAlbumId > %s", string(key))
+	deleteByDB(key)
+}
 
-// func setMediaAlbumIdByChatMessageId(chatId, messageId, mediaAlbumId int64) {
-// 	key := []byte(fmt.Sprintf("%s:%d:%d", mediaAlbumIdByMessageIdPrefix, chatId, messageId))
-// 	val := []byte(fmt.Sprintf("%d", mediaAlbumId))
-// 	log.Printf("setMediaAlbumIdByChatMessageId > %s %s", string(key), string(val))
-// 	setByDB(key, val)
-// }
+const mediaAlbumIdByMessageIdPrefix = "ma-msg"
 
-// func getMediaAlbumIdByChatMessageId(chatId, messageId int64) int64 {
-// 	key := []byte(fmt.Sprintf("%s:%d:%d", mediaAlbumIdByMessageIdPrefix, chatId, messageId))
-// 	val := getByDB(key)
-// 	if val == nil {
-// 		return 0
-// 	}
-// 	log.Printf("getMediaAlbumIdByChatMessageId > %s %s", string(key), string(val))
-// 	return int64(convertToInt(string(val)))
-// }
+func setMediaAlbumIdByChatMessageId(chatId, messageId, mediaAlbumId int64) {
+	key := []byte(fmt.Sprintf("%s:%d:%d", mediaAlbumIdByMessageIdPrefix, chatId, messageId))
+	val := []byte(fmt.Sprintf("%d", mediaAlbumId))
+	log.Printf("setMediaAlbumIdByChatMessageId > %s %s", string(key), string(val))
+	setByDB(key, val)
+}
+
+func getMediaAlbumIdByChatMessageId(chatId, messageId int64) int64 {
+	key := []byte(fmt.Sprintf("%s:%d:%d", mediaAlbumIdByMessageIdPrefix, chatId, messageId))
+	val := getByDB(key)
+	if val == nil {
+		return 0
+	}
+	log.Printf("getMediaAlbumIdByChatMessageId > %s %s", string(key), string(val))
+	return int64(convertToInt(string(val)))
+}
+
+func deleteMediaAlbumIdByChatMessageId(chatId, messageId int64) {
+	key := []byte(fmt.Sprintf("%s:%d:%d", mediaAlbumIdByMessageIdPrefix, chatId, messageId))
+	log.Printf("deleteMediaAlbumIdByChatMessageId > %s", string(key))
+	deleteByDB(key)
+}
 
 const withRepeat = 0
 const woRepeat = -1
@@ -842,7 +889,7 @@ func addAnswerButton(chatId, messageId int64, sourceData string) {
 	}); err != nil {
 		log.Print(err)
 	}
-	// TODO: а если кнопка была удалена при редактировании - тоже нужна синхронизация
+	// TODO: а если кнопка была удалена при редактировании - тоже нужна синхронизация?
 }
 
 func hasForwardAnswer(chatId int64) bool {
