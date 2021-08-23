@@ -3,6 +3,8 @@ package main
 // TODO: отключение модерации, прямая пересылка из From в To (т.к. надо накапливать ссылочную БД)
 
 // TODO: функционал для модерирования редактирования (можно хранить историю через ReplyToMessageId?); учитывать, что может быть несколько копий в dst - нужно везде внести изменения из dst
+// копирование в DST отредактированных сообщений (Forward.EditHistory) после модерации, как редактирование первого в цепочке ответов
+
 // TODO: строковые константы вместо числовых кодов ошибок
 
 import (
@@ -15,11 +17,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf16"
 
 	"github.com/comerc/shunt/config"
 	"github.com/dgraph-io/badger"
@@ -184,22 +188,22 @@ func main() {
 								data = string(callbackQueryPayloadData.Data)
 							}
 							if data == "" {
-								log.Print("CallbackQueryPayloadData: data is empty")
+								log.Print("CallbackQueryPayloadData > data is empty")
 								return 1001
 							}
 							a := strings.Split(data, "|")
 							if len(a) != 3 {
-								log.Print("CallbackQueryPayloadData: invalid data - len() ")
+								log.Print("CallbackQueryPayloadData > invalid data - len() ")
 								return 1002
 							}
 							command := a[0]
 							if !contains([]string{"ANSWER", "OK", "CANCEL"}, command) {
-								log.Print("CallbackQueryPayloadData: invalid data - command")
+								log.Print("CallbackQueryPayloadData > invalid data - command")
 								return 1003
 							}
 							srcId := int64(convertToInt(a[1]))
 							if srcId == 0 {
-								log.Print("CallbackQueryPayloadData: invalid data - srcId")
+								log.Print("CallbackQueryPayloadData > invalid data - srcId")
 								return 1004
 							}
 							src, err := tdlibClient.GetMessage(&client.GetMessageRequest{
@@ -213,33 +217,34 @@ func main() {
 							payloadData := a[2]
 							aa := strings.Split(payloadData, ":")
 							if len(aa) != 3 {
-								log.Print("CallbackQueryPayloadData: invalid payloadData - len() ")
+								log.Print("CallbackQueryPayloadData > invalid payloadData - len() ")
 								return 1006
 							}
 							sourceChatId := int64(convertToInt(aa[0]))
 							if sourceChatId == 0 {
-								log.Print("CallbackQueryPayloadData: invalid payloadData - sourceChatId")
+								log.Print("CallbackQueryPayloadData > invalid payloadData - sourceChatId")
 								return 1007
 							}
 							sourceMessageId := int64(convertToInt(aa[1]))
 							if sourceMessageId == 0 {
-								log.Print("CallbackQueryPayloadData: invalid payloadData - sourceMessageId")
+								log.Print("CallbackQueryPayloadData > invalid payloadData - sourceMessageId")
 								return 1008
 							}
 							sourceMediaAlbumId := int64(convertToInt(aa[2]))
 							if sourceMediaAlbumId == 0 {
-								log.Print("CallbackQueryPayloadData: invalid payloadData - sourceMediaAlbumId")
+								log.Print("CallbackQueryPayloadData > invalid payloadData - sourceMediaAlbumId")
 								return 1009
 							} else if sourceMediaAlbumId == -1 {
 								sourceMediaAlbumId = 0 // т.к. 0 - значимое значение, то передаётся, как -1
 							}
-							log.Printf("CallbackQueryPayloadData command: %s srcId: %d sourceChatId: %d sourceMessageId: %d sourceMediaAlbumId: %d", command, srcId, sourceChatId, sourceMessageId, sourceMediaAlbumId)
+							log.Printf("CallbackQueryPayloadData > command: %s srcId: %d sourceChatId: %d sourceMessageId: %d sourceMediaAlbumId: %d", command, srcId, sourceChatId, sourceMessageId, sourceMediaAlbumId)
 							if command == "ANSWER" {
-								// TODO: добавить текст в src
 								answer := getAnswer(sourceChatId, sourceMessageId)
 								log.Print("**** Answer ", answer)
-								deleteButton(query.ChatId, query.MessageId)
-								return 0
+								if !addAnswer(sourceChatId, sourceMessageId, answer) {
+									log.Print("CallbackQueryPayloadData > addAnswer() is false")
+									return 1016
+								}
 							} else {
 								var messageIds []int64
 								// sourceLink := a[2]
@@ -251,7 +256,7 @@ func main() {
 								// 	return 1006
 								// }
 								// if messageLinkInfo.Message == nil {
-								// 	log.Print("GetMessageLinkInfo(): messageLinkInfo.Message is empty")
+								// 	log.Print("GetMessageLinkInfo > messageLinkInfo.Message is empty")
 								// 	return 1007
 								// }
 								if sourceMediaAlbumId != 0 {
@@ -276,11 +281,11 @@ func main() {
 											MessageIds: messageIds,
 										})
 										if err != nil {
-											log.Print("ForwardMessages() ", err)
+											log.Print("ForwardMessages > ", err)
 											return 1012
 										}
 										if len(messages.Messages) != int(messages.TotalCount) || messages.TotalCount == 0 {
-											log.Print("ForwardMessages(): invalid TotalCount")
+											log.Print("ForwardMessages > invalid TotalCount")
 											return 1013
 										}
 										// TODO: выставить флаг в базе, что выполнен форвард (если несколько модераторов)
@@ -302,29 +307,6 @@ func main() {
 											log.Print(err)
 											return 1015
 										}
-										// message, err := tdlibClient.GetMessage(&client.GetMessageRequest{
-										// 	ChatId:    query.ChatId,
-										// 	MessageId: query.MessageId,
-										// })
-										// if err != nil {
-										// 	log.Print("GetMessage() ", err)
-										// 	return 1014
-										// }
-										// if formattedText := getFormattedText(message.Content); formattedText != nil {
-										// 	formattedText.Text += " #" + command
-										// 	if _, err := tdlibClient.EditMessageText(&client.EditMessageTextRequest{
-										// 		ChatId:    query.ChatId,
-										// 		MessageId: query.MessageId,
-										// 		InputMessageContent: &client.InputMessageText{
-										// 			Text:                  formattedText,
-										// 			DisableWebPagePreview: true,
-										// 			ClearDraft:            true,
-										// 		},
-										// 	}); err != nil {
-										// 		log.Print("EditMessageText() ", err)
-										// 		return 1015
-										// 	}
-										// }
 										break
 									}
 								}
@@ -350,9 +332,9 @@ func main() {
 			case *client.UpdateNewMessage:
 				updateNewMessage := updateType
 				src := updateNewMessage.Message
-				log.Printf("updateNewMessage %d:%d", src.ChatId, src.Id)
+				log.Printf("updateNewMessage > %d:%d", src.ChatId, src.Id)
 				if src.IsOutgoing {
-					log.Print("src.IsOutgoing ", src.ChatId)
+					log.Print("src.IsOutgoing > ", src.ChatId)
 					continue // !!
 				}
 				// TODO: системное сообщение отправлять сразу, без задержки в очереди, а уже в очереди его дополнять
@@ -395,7 +377,7 @@ func main() {
 								ForAlbum:  src.MediaAlbumId != 0,
 							})
 							if err != nil {
-								log.Print("GetMessageLink() ", err)
+								log.Print("GetMessageLink > ", err)
 								return nil
 							}
 							result, err := tdlibClient.ParseTextEntities(&client.ParseTextEntitiesRequest{
@@ -405,7 +387,7 @@ func main() {
 								},
 							})
 							if err != nil {
-								log.Print("ParseTextEntities() ", err)
+								log.Print("ParseTextEntities > ", err)
 								return nil
 							}
 							return result
@@ -450,7 +432,7 @@ func main() {
 								return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
 							}(),
 						}); err != nil {
-							log.Print("SendMessage() ", err)
+							log.Print("SendMessage > ", err)
 							return
 						}
 					} else if hasForwardAnswer(src.ChatId) && (src.MediaAlbumId == 0) {
@@ -471,7 +453,7 @@ func main() {
 				// updateMessageEdited := updateType
 				// chatId := updateMessageEdited.ChatId
 				// messageId := updateMessageEdited.MessageId
-				// log.Printf("updateMessageEdited %d:%d", chatId, messageId)
+				// log.Printf("updateMessageEdited > %d:%d", chatId, messageId)
 				// fn := func() {
 				// 	isForwardAnswer := hasForwardAnswer(chatId)
 				// 	if (chatId == configData.Main) || isForwardAnswer {
@@ -507,8 +489,13 @@ func main() {
 				// 	}
 				// }
 				// queue.PushBack(fn)
+			case *client.UpdateDeleteMessages:
+				updateDeleteMessages := updateType
+				if !updateDeleteMessages.IsPermanent {
+					continue
+				}
+				// TODO: удаление из setMessageIdsByChatMediaAlbumId
 			}
-			// TODO: удаление из setMessageIdsByChatMediaAlbumId
 		}
 	}
 }
@@ -516,7 +503,7 @@ func main() {
 func convertToInt(s string) int {
 	i, err := strconv.Atoi(s)
 	if err != nil {
-		log.Print("convertToInt() ", err)
+		log.Print("convertToInt > ", err)
 		return 0
 	}
 	return int(i)
@@ -589,9 +576,9 @@ func getByDB(key []byte) []byte {
 		return nil
 	})
 	if err != nil {
-		log.Printf("getByDB() key: %s err: %s", string(key), err)
+		log.Printf("getByDB > key: %s err: %s", string(key), err)
 		// } else {
-		// log.Printf("getByDB() key: %s val: %s", string(key), string(val))
+		// log.Printf("getByDB > key: %s val: %s", string(key), string(val))
 	}
 	return val
 }
@@ -602,9 +589,9 @@ func setByDB(key []byte, val []byte) {
 		return err
 	})
 	if err != nil {
-		log.Printf("setByDB() key: %s err: %s ", string(key), err)
+		log.Printf("setByDB > key: %s err: %s ", string(key), err)
 		// } else {
-		// log.Printf("setByDB() key: %s val: %s", string(key), string(val))
+		// log.Printf("setByDB > key: %s val: %s", string(key), string(val))
 	}
 }
 
@@ -629,35 +616,35 @@ func setByDB(key []byte, val []byte) {
 // 	return result
 // }
 
-// func strLen(s string) int {
-// 	return len(utf16.Encode([]rune(s)))
-// }
+func strLen(s string) int {
+	return len(utf16.Encode([]rune(s)))
+}
 
-// func escapeAll(s string) string {
-// 	// эскейпит все символы: которые нужны для markdown-разметки
-// 	a := []string{
-// 		"_",
-// 		"*",
-// 		`\[`,
-// 		`\]`,
-// 		"(",
-// 		")",
-// 		"~",
-// 		"`",
-// 		">",
-// 		"#",
-// 		"+",
-// 		`\-`,
-// 		"=",
-// 		"|",
-// 		"{",
-// 		"}",
-// 		".",
-// 		"!",
-// 	}
-// 	re := regexp.MustCompile("[" + strings.Join(a, "|") + "]")
-// 	return re.ReplaceAllString(s, `\$0`)
-// }
+func escapeAll(s string) string {
+	// эскейпит все символы: которые нужны для markdown-разметки
+	a := []string{
+		"_",
+		"*",
+		`\[`,
+		`\]`,
+		"(",
+		")",
+		"~",
+		"`",
+		">",
+		"#",
+		"+",
+		`\-`,
+		"=",
+		"|",
+		"{",
+		"}",
+		".",
+		"!",
+	}
+	re := regexp.MustCompile("[" + strings.Join(a, "|") + "]")
+	return re.ReplaceAllString(s, `\$0`)
+}
 
 // func getRand(min, max int) int {
 // 	rand.Seed(time.Now().UnixNano())
@@ -688,7 +675,7 @@ const messageIdsByMediaAlbumIdPrefix = "msg-ma"
 
 func setMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId int64, messageIds []int64) {
 	key := []byte(fmt.Sprintf("%s:%d:%d", messageIdsByMediaAlbumIdPrefix, chatId, mediaAlbumId))
-	log.Printf("setMessageIdsByChatMediaAlbumId() %s %v", string(key), messageIds)
+	log.Printf("setMessageIdsByChatMediaAlbumId > %s %v", string(key), messageIds)
 	val, err := json.Marshal(messageIds)
 	if err != nil {
 		log.Print(err)
@@ -708,7 +695,7 @@ func getMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId int64) []int64 {
 		log.Print(err)
 		return nil
 	}
-	log.Printf("getMessageIdsByChatMediaAlbumId() %s %v", string(key), result)
+	log.Printf("getMessageIdsByChatMediaAlbumId > %s %v", string(key), result)
 	return result
 }
 
@@ -717,7 +704,7 @@ func getMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId int64) []int64 {
 // func setMediaAlbumIdByChatMessageId(chatId, messageId, mediaAlbumId int64) {
 // 	key := []byte(fmt.Sprintf("%s:%d:%d", mediaAlbumIdByMessageIdPrefix, chatId, messageId))
 // 	val := []byte(fmt.Sprintf("%d", mediaAlbumId))
-// 	log.Printf("setMediaAlbumIdByChatMessageId() %s %s", string(key), string(val))
+// 	log.Printf("setMediaAlbumIdByChatMessageId > %s %s", string(key), string(val))
 // 	setByDB(key, val)
 // }
 
@@ -727,7 +714,7 @@ func getMessageIdsByChatMediaAlbumId(chatId, mediaAlbumId int64) []int64 {
 // 	if val == nil {
 // 		return 0
 // 	}
-// 	log.Printf("getMediaAlbumIdByChatMessageId() %s %s", string(key), string(val))
+// 	log.Printf("getMediaAlbumIdByChatMessageId > %s %s", string(key), string(val))
 // 	return int64(convertToInt(string(val)))
 // }
 
@@ -735,7 +722,7 @@ const withRepeat = 0
 const woRepeat = -1
 
 func hasAnswerButton(chatId, messageId, step int64) bool {
-	log.Printf("hasAnswerButton chatId: %d messageId: %d step: %d", chatId, messageId, step)
+	log.Printf("hasAnswerButton > chatId: %d messageId: %d step: %d", chatId, messageId, step)
 	isRepeat := step != woRepeat
 	if isRepeat {
 		if step >= configData.AnswerRepeat {
@@ -837,7 +824,7 @@ func runQueue() {
 }
 
 func addAnswerButton(chatId, messageId int64, sourceData string) {
-	log.Printf("addAnswerButton chatId: %d messageId: %d sourceData: %s", chatId, messageId, sourceData)
+	log.Printf("addAnswerButton > chatId: %d messageId: %d sourceData: %s", chatId, messageId, sourceData)
 	if _, err := tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
 		ChatId:    chatId,
 		MessageId: messageId,
@@ -866,7 +853,7 @@ func hasForwardAnswer(chatId int64) bool {
 }
 
 func addWaitButton(chatId, messageId int64) {
-	log.Printf("addWaitButton chatId: %d messageId: %d", chatId, messageId)
+	log.Printf("addWaitButton > chatId: %d messageId: %d", chatId, messageId)
 	if _, err := tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
 		ChatId:    chatId,
 		MessageId: messageId,
@@ -887,7 +874,7 @@ func addWaitButton(chatId, messageId int64) {
 }
 
 func deleteButton(chatId, messageId int64) {
-	log.Printf("deleteButton chatId: %d messageId: %d", chatId, messageId)
+	log.Printf("deleteButton > chatId: %d messageId: %d", chatId, messageId)
 	if _, err := tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
 		ChatId:      chatId,
 		MessageId:   messageId,
@@ -910,7 +897,7 @@ func deleteButton(chatId, messageId int64) {
 }
 
 func getAnswer(chatId, messageId int64) string {
-	log.Printf("getAnswer chatId: %d messageId: %d", chatId, messageId)
+	log.Printf("getAnswer > chatId: %d messageId: %d", chatId, messageId)
 	if configData.AnswerEndpoint == "" {
 		err := fmt.Errorf("Config.AnswerEndpoint is empty")
 		log.Print(err)
@@ -940,4 +927,58 @@ func getAnswer(chatId, messageId int64) string {
 		return ""
 	}
 	return string(result)
+}
+
+func addAnswer(chatId, messageId int64, answer string) bool {
+	if answer == "" {
+		log.Print("addAnswer > answer is empty")
+		return false
+	}
+	answerFormattedText, err := tdlibClient.ParseTextEntities(&client.ParseTextEntitiesRequest{
+		Text: escapeAll(answer),
+		ParseMode: &client.TextParseModeMarkdown{
+			Version: 2,
+		},
+	})
+	if err != nil {
+		log.Print("ParseTextEntities > ", err)
+		return false
+	}
+	message, err := tdlibClient.GetMessage(&client.GetMessageRequest{
+		ChatId:    chatId,
+		MessageId: messageId,
+	})
+	if err != nil {
+		log.Print("GetMessage > ", err)
+		return false
+	}
+	formattedText := getFormattedText(message.Content)
+	if formattedText == nil {
+		log.Print("getFormattedText > result is empty")
+		return false
+	}
+	offset := int32(strLen(formattedText.Text))
+	if offset > 0 {
+		formattedText.Text += "\n\n"
+		offset = offset + 2
+	}
+	for _, entity := range answerFormattedText.Entities {
+		entity.Offset += offset
+	}
+	formattedText.Text += answerFormattedText.Text
+	formattedText.Entities = append(formattedText.Entities, answerFormattedText.Entities...)
+	if _, err := tdlibClient.EditMessageText(&client.EditMessageTextRequest{
+		ChatId:    chatId,
+		MessageId: messageId,
+		InputMessageContent: &client.InputMessageText{
+			Text:                  formattedText,
+			DisableWebPagePreview: true,
+			ClearDraft:            true,
+		},
+		ReplyMarkup: message.ReplyMarkup,
+	}); err != nil {
+		log.Print("EditMessageText > ", err)
+		return false
+	}
+	return true
 }
