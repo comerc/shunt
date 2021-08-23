@@ -9,6 +9,7 @@ import (
 	"container/list"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -174,8 +175,7 @@ func main() {
 				updateNewCallbackQuery := updateType
 				// TODO: если несколько модераторов (нужно проверять флаг в базе по query.MessageId)
 				query := updateNewCallbackQuery
-				forward, isForward := configData.Forwards[query.ChatId]
-				if (query.ChatId == configData.Main) || (isForward && forward.Answer) {
+				if (query.ChatId == configData.Main) || hasForwardAnswer(query.ChatId) {
 					// log.Printf("%#v", query)
 					fn := func() {
 						errorCode := func() int {
@@ -236,7 +236,10 @@ func main() {
 							log.Printf("CallbackQueryPayloadData command: %s srcId: %d sourceChatId: %d sourceMessageId: %d sourceMediaAlbumId: %d", command, srcId, sourceChatId, sourceMessageId, sourceMediaAlbumId)
 							if command == "ANSWER" {
 								// TODO: добавить текст в src
-
+								answer := getAnswer(sourceChatId, sourceMessageId)
+								log.Print("**** Answer ", answer)
+								deleteButton(query.ChatId, query.MessageId)
+								return 0
 							} else {
 								var messageIds []int64
 								// sourceLink := a[2]
@@ -354,8 +357,7 @@ func main() {
 				}
 				// TODO: системное сообщение отправлять сразу, без задержки в очереди, а уже в очереди его дополнять
 				fn := func() {
-					forward, isForward := configData.Forwards[src.ChatId]
-					if (src.ChatId == configData.Main) || isForward {
+					if (src.ChatId == configData.Main) || hasForwardAnswer(src.ChatId) {
 						if src.MediaAlbumId != 0 {
 							mediaAlbumId := int64(src.MediaAlbumId)
 							messageIds := getMessageIdsByChatMediaAlbumId(src.ChatId, mediaAlbumId)
@@ -375,9 +377,14 @@ func main() {
 							sourceChatId := int64(convertToInt(a[0]))
 							sourceMessageId := int64(convertToInt(a[1]))
 							if hasForwardAnswer(sourceChatId) {
-								if hasAnswerButton(sourceChatId, sourceMessageId, withRepeat) {
-									addAnswerButton(src.ChatId, src.Id, sourceData)
-								}
+								addWaitButton(src.ChatId, src.Id)
+								go func() {
+									if hasAnswerButton(sourceChatId, sourceMessageId, withRepeat) {
+										addAnswerButton(src.ChatId, src.Id, sourceData)
+									} else {
+										deleteButton(src.ChatId, src.Id)
+									}
+								}()
 							}
 						}
 						formattedText := func() *client.FormattedText {
@@ -446,11 +453,16 @@ func main() {
 							log.Print("SendMessage() ", err)
 							return
 						}
-					} else if isForward && forward.Answer && (src.MediaAlbumId == 0) {
-						if hasAnswerButton(src.ChatId, src.Id, withRepeat) {
-							sourceData := fmt.Sprintf("%d:%d:-1", src.ChatId, src.Id)
-							addAnswerButton(src.ChatId, src.Id, sourceData)
-						}
+					} else if hasForwardAnswer(src.ChatId) && (src.MediaAlbumId == 0) {
+						addWaitButton(src.ChatId, src.Id)
+						go func() {
+							if hasAnswerButton(src.ChatId, src.Id, withRepeat) {
+								sourceData := fmt.Sprintf("%d:%d:-1", src.ChatId, src.Id)
+								addAnswerButton(src.ChatId, src.Id, sourceData)
+							} else {
+								deleteButton(src.ChatId, src.Id)
+							}
+						}()
 					}
 				}
 				queue.PushBack(fn)
@@ -851,4 +863,81 @@ func hasForwardAnswer(chatId int64) bool {
 		return true
 	}
 	return false
+}
+
+func addWaitButton(chatId, messageId int64) {
+	log.Printf("addWaitButton chatId: %d messageId: %d", chatId, messageId)
+	if _, err := tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
+		ChatId:    chatId,
+		MessageId: messageId,
+		ReplyMarkup: func() client.ReplyMarkup {
+			Rows := make([][]*client.InlineKeyboardButton, 0)
+			Btns := make([]*client.InlineKeyboardButton, 0)
+			Btns = append(Btns, &client.InlineKeyboardButton{
+				Text: "⏳", Type: &client.InlineKeyboardButtonTypeCallback{
+					Data: []byte("..."),
+				},
+			})
+			Rows = append(Rows, Btns)
+			return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+		}(),
+	}); err != nil {
+		log.Print(err)
+	}
+}
+
+func deleteButton(chatId, messageId int64) {
+	log.Printf("deleteButton chatId: %d messageId: %d", chatId, messageId)
+	if _, err := tdlibClient.EditMessageReplyMarkup(&client.EditMessageReplyMarkupRequest{
+		ChatId:      chatId,
+		MessageId:   messageId,
+		ReplyMarkup: &client.ReplyMarkupInlineKeyboard{},
+		// TODO: не меняет статус сообщения на "изменено"
+		// func() client.ReplyMarkup {
+		// 	Rows := make([][]*client.InlineKeyboardButton, 0)
+		// 	Btns := make([]*client.InlineKeyboardButton, 0)
+		// 	Btns = append(Btns, &client.InlineKeyboardButton{
+		// 		Text: "❌", Type: &client.InlineKeyboardButtonTypeCallback{
+		// 			Data: []byte("..."),
+		// 		},
+		// 	})
+		// 	Rows = append(Rows, Btns)
+		// 	return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+		// }(),
+	}); err != nil {
+		log.Print(err)
+	}
+}
+
+func getAnswer(chatId, messageId int64) string {
+	log.Printf("getAnswer chatId: %d messageId: %d", chatId, messageId)
+	if configData.AnswerEndpoint == "" {
+		err := fmt.Errorf("Config.AnswerEndpoint is empty")
+		log.Print(err)
+		return ""
+	}
+	url := fmt.Sprintf("%s/answer?chat_id=%d&message_id=%d&only_check=0&rand=%d",
+		configData.AnswerEndpoint, chatId, messageId, time.Now().UnixNano())
+	log.Print(url)
+	response, err := http.Get(url)
+	if err != nil {
+		log.Print(err)
+		return ""
+	}
+	defer response.Body.Close()
+	log.Printf("%#v", response)
+	if response.StatusCode != http.StatusOK {
+		return ""
+	}
+	// b, err := httputil.DumpResponse(response, true)
+	// if err != nil {
+	// 	log.Print(err)
+	// }
+	// log.Print(string(b))
+	result, err := io.ReadAll(response.Body)
+	if err != nil {
+		log.Print(err)
+		return ""
+	}
+	return string(result)
 }
