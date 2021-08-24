@@ -333,13 +333,16 @@ func main() {
 			case *client.UpdateNewMessage:
 				updateNewMessage := updateType
 				src := updateNewMessage.Message
-				log.Printf("updateNewMessage > %d:%d", src.ChatId, src.Id)
 				if src.IsOutgoing {
 					log.Print("src.IsOutgoing > ", src.ChatId)
 					continue // !!
 				}
+				if (src.ChatId != configData.Main) && !hasForwardAnswer(src.ChatId) {
+					continue
+				}
 				// TODO: системное сообщение отправлять сразу, без задержки в очереди, а уже в очереди его дополнять
 				fn := func() {
+					log.Printf("updateNewMessage > %d:%d", src.ChatId, src.Id)
 					if (src.ChatId == configData.Main) || hasForwardAnswer(src.ChatId) {
 						if src.MediaAlbumId != 0 {
 							mediaAlbumId := int64(src.MediaAlbumId)
@@ -455,8 +458,8 @@ func main() {
 				// updateMessageEdited := updateType
 				// chatId := updateMessageEdited.ChatId
 				// messageId := updateMessageEdited.MessageId
-				// log.Printf("updateMessageEdited > %d:%d", chatId, messageId)
 				// fn := func() {
+				//  log.Printf("updateMessageEdited > %d:%d", chatId, messageId)
 				// 	isForwardAnswer := hasForwardAnswer(chatId)
 				// 	if (chatId == configData.Main) || isForwardAnswer {
 				// 		src, err := tdlibClient.GetMessage(&client.GetMessageRequest{
@@ -497,9 +500,12 @@ func main() {
 					continue
 				}
 				chatId := updateDeleteMessages.ChatId
+				if (chatId != configData.Main) && !hasForwardAnswer(chatId) {
+					continue
+				}
 				messageIds := updateDeleteMessages.MessageIds
-				log.Printf("updateDeleteMessages > %d:%v", chatId, messageIds)
 				fn := func() {
+					log.Printf("updateDeleteMessages > %d:%v", chatId, messageIds)
 					for _, messageId := range messageIds {
 						mediaAlbumId := getMediaAlbumIdByChatMessageId(chatId, messageId)
 						if mediaAlbumId == 0 {
