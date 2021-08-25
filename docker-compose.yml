@@ -8,11 +8,11 @@ services:
       network: host
     image: shunt
     expose:
-      - '4004'
+      - '4848'
     volumes:
       - './:/app'
     working_dir: /app
     # stdin_open: true
     # tty: true
     ports:
-      - 4004:4004
+      - 4848:4848
