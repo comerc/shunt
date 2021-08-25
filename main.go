@@ -1,6 +1,6 @@
 package main
 
-// TODO: отключение модерации, прямая пересылка из From в To (т.к. надо накапливать ссылочную БД)
+// TODO: отключение модерации, прямая пересылка из From в To (т.к. надо накапливать ссылочную БД) + AutoAnswers в budva32
 
 // TODO: функционал для модерирования редактирования (можно хранить историю через ReplyToMessageId?); учитывать, что может быть несколько копий в dst - нужно везде внести изменения из dst
 // копирование в DST отредактированных сообщений (Forward.EditHistory) после модерации, как редактирование первого в цепочке ответов
@@ -242,9 +242,8 @@ func main() {
 						log.Printf("CallbackQueryPayloadData > command: %s srcId: %d sourceChatId: %d sourceMessageId: %d sourceMediaAlbumId: %d", command, srcId, sourceChatId, sourceMessageId, sourceMediaAlbumId)
 						if command == "ANSWER" {
 							answer := getAnswer(sourceChatId, sourceMessageId)
-							log.Print("**** Answer ", answer)
 							if !addAnswer(sourceChatId, sourceMessageId, answer) {
-								log.Print("CallbackQueryPayloadData > addAnswer() is false")
+								log.Print("addAnswer > false")
 								return 1016
 							}
 						} else {
@@ -342,7 +341,7 @@ func main() {
 				}
 				// TODO: системное сообщение отправлять сразу, без задержки в очереди, а уже в очереди его дополнять
 				fn := func() {
-					log.Printf("updateNewMessage > %d:%d", src.ChatId, src.Id)
+					log.Printf("UpdateNewMessage > %d:%d", src.ChatId, src.Id)
 					if (src.ChatId == configData.Main) || hasForwardAnswer(src.ChatId) {
 						if src.MediaAlbumId != 0 {
 							mediaAlbumId := int64(src.MediaAlbumId)
@@ -459,7 +458,7 @@ func main() {
 				// chatId := updateMessageEdited.ChatId
 				// messageId := updateMessageEdited.MessageId
 				// fn := func() {
-				//  log.Printf("updateMessageEdited > %d:%d", chatId, messageId)
+				//  log.Printf("UpdateMessageEdited > %d:%d", chatId, messageId)
 				// 	isForwardAnswer := hasForwardAnswer(chatId)
 				// 	if (chatId == configData.Main) || isForwardAnswer {
 				// 		src, err := tdlibClient.GetMessage(&client.GetMessageRequest{
@@ -505,7 +504,7 @@ func main() {
 				}
 				messageIds := updateDeleteMessages.MessageIds
 				fn := func() {
-					log.Printf("updateDeleteMessages > %d:%v", chatId, messageIds)
+					log.Printf("UpdateDeleteMessages > %d:%v", chatId, messageIds)
 					for _, messageId := range messageIds {
 						mediaAlbumId := getMediaAlbumIdByChatMessageId(chatId, messageId)
 						if mediaAlbumId == 0 {
