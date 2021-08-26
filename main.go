@@ -1,5 +1,7 @@
 package main
 
+// TODO: при ручном удалении From-сообщения нужно удалять системное сообщение в Main
+
 // TODO: отключение модерации, прямая пересылка из From в To (т.к. надо накапливать ссылочную БД) + AutoAnswers в budva32
 
 // TODO: функционал для модерирования редактирования (можно хранить историю через ReplyToMessageId?); учитывать, что может быть несколько копий в dst - нужно везде внести изменения из dst
@@ -336,13 +338,13 @@ func main() {
 					log.Print("src.IsOutgoing > ", src.ChatId)
 					continue // !!
 				}
-				if (src.ChatId != configData.Main) && !hasForwardAnswer(src.ChatId) {
+				if (src.ChatId != configData.Main) && !hasForward(src.ChatId) {
 					continue
 				}
 				// TODO: системное сообщение отправлять сразу, без задержки в очереди, а уже в очереди его дополнять
 				fn := func() {
 					log.Printf("UpdateNewMessage > %d:%d", src.ChatId, src.Id)
-					if (src.ChatId == configData.Main) || hasForwardAnswer(src.ChatId) {
+					if (src.ChatId == configData.Main) || hasForward(src.ChatId) {
 						if src.MediaAlbumId != 0 {
 							mediaAlbumId := int64(src.MediaAlbumId)
 							setMediaAlbumIdByChatMessageId(src.ChatId, src.Id, mediaAlbumId)
@@ -439,7 +441,7 @@ func main() {
 							log.Print("SendMessage > ", err)
 							return
 						}
-					} else if hasForwardAnswer(src.ChatId) && (src.MediaAlbumId == 0) {
+					} else if (src.MediaAlbumId == 0) && hasForwardAnswer(src.ChatId) {
 						addWaitButton(src.ChatId, src.Id)
 						go func() {
 							if hasAnswerButton(src.ChatId, src.Id, withRepeat) {
@@ -499,7 +501,7 @@ func main() {
 					continue
 				}
 				chatId := updateDeleteMessages.ChatId
-				if (chatId != configData.Main) && !hasForwardAnswer(chatId) {
+				if (chatId != configData.Main) && !hasForward(chatId) {
 					continue
 				}
 				messageIds := updateDeleteMessages.MessageIds
@@ -895,6 +897,13 @@ func addAnswerButton(chatId, messageId int64, sourceData string) {
 		log.Print(err)
 	}
 	// TODO: а если кнопка была удалена при редактировании - тоже нужна синхронизация?
+}
+
+func hasForward(chatId int64) bool {
+	if _, ok := configData.Forwards[chatId]; ok {
+		return true
+	}
+	return false
 }
 
 func hasForwardAnswer(chatId int64) bool {
