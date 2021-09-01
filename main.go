@@ -418,22 +418,22 @@ func main() {
 								if sourceData == "" || formattedText == nil {
 									return nil
 								}
-								Rows := make([][]*client.InlineKeyboardButton, 0)
-								Btns := make([]*client.InlineKeyboardButton, 0)
-								Btns = append(Btns, &client.InlineKeyboardButton{
+								rows := make([][]*client.InlineKeyboardButton, 0)
+								btns := make([]*client.InlineKeyboardButton, 0)
+								btns = append(btns, &client.InlineKeyboardButton{
 									Text: "✅ Yes!",
 									Type: &client.InlineKeyboardButtonTypeCallback{
 										Data: []byte(fmt.Sprintf("OK|%d|%s", src.Id, sourceData)),
 									},
 								})
-								Btns = append(Btns, &client.InlineKeyboardButton{
+								btns = append(btns, &client.InlineKeyboardButton{
 									Text: "🛑 Stop",
 									Type: &client.InlineKeyboardButtonTypeCallback{
 										Data: []byte(fmt.Sprintf("CANCEL|%d|%s", src.Id, sourceData)),
 									},
 								})
-								Rows = append(Rows, Btns)
-								return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+								rows = append(rows, btns)
+								return &client.ReplyMarkupInlineKeyboard{Rows: rows}
 							}(),
 						}); err != nil {
 							log.Print("SendMessage > ", err)
@@ -881,15 +881,15 @@ func addAnswerButton(chatId, messageId int64, sourceData string) {
 		ChatId:    chatId,
 		MessageId: messageId,
 		ReplyMarkup: func() client.ReplyMarkup {
-			Rows := make([][]*client.InlineKeyboardButton, 0)
-			Btns := make([]*client.InlineKeyboardButton, 0)
-			Btns = append(Btns, &client.InlineKeyboardButton{
+			rows := make([][]*client.InlineKeyboardButton, 0)
+			btns := make([]*client.InlineKeyboardButton, 0)
+			btns = append(btns, &client.InlineKeyboardButton{
 				Text: "Answer", Type: &client.InlineKeyboardButtonTypeCallback{
 					Data: []byte(fmt.Sprintf("ANSWER|%d|%s", messageId, sourceData)),
 				},
 			})
-			Rows = append(Rows, Btns)
-			return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+			rows = append(rows, btns)
+			return &client.ReplyMarkupInlineKeyboard{Rows: rows}
 		}(),
 	}); err != nil {
 		log.Print(err)
@@ -917,15 +917,15 @@ func addWaitButton(chatId, messageId int64) {
 		ChatId:    chatId,
 		MessageId: messageId,
 		ReplyMarkup: func() client.ReplyMarkup {
-			Rows := make([][]*client.InlineKeyboardButton, 0)
-			Btns := make([]*client.InlineKeyboardButton, 0)
-			Btns = append(Btns, &client.InlineKeyboardButton{
+			rows := make([][]*client.InlineKeyboardButton, 0)
+			btns := make([]*client.InlineKeyboardButton, 0)
+			btns = append(btns, &client.InlineKeyboardButton{
 				Text: "⏳", Type: &client.InlineKeyboardButtonTypeCallback{
 					Data: []byte("..."),
 				},
 			})
-			Rows = append(Rows, Btns)
-			return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+			rows = append(rows, btns)
+			return &client.ReplyMarkupInlineKeyboard{Rows: rows}
 		}(),
 	}); err != nil {
 		log.Print(err)
@@ -940,15 +940,15 @@ func deleteButton(chatId, messageId int64) {
 		ReplyMarkup: &client.ReplyMarkupInlineKeyboard{},
 		// TODO: не меняет статус сообщения на "изменено"
 		// func() client.ReplyMarkup {
-		// 	Rows := make([][]*client.InlineKeyboardButton, 0)
-		// 	Btns := make([]*client.InlineKeyboardButton, 0)
-		// 	Btns = append(Btns, &client.InlineKeyboardButton{
+		// 	rows := make([][]*client.InlineKeyboardButton, 0)
+		// 	btns := make([]*client.InlineKeyboardButton, 0)
+		// 	btns =append(btns, &client.InlineKeyboardButton{
 		// 		Text: "❌", Type: &client.InlineKeyboardButtonTypeCallback{
 		// 			Data: []byte("..."),
 		// 		},
 		// 	})
-		// 	Rows = append(Rows, Btns)
-		// 	return &client.ReplyMarkupInlineKeyboard{Rows: Rows}
+		// 	rows = append(rows, btns)
+		// 	return &client.ReplyMarkupInlineKeyboard{Rows: rows}
 		// }(),
 	}); err != nil {
 		log.Print(err)
